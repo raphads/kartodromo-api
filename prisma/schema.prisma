@@ -18,3 +18,10 @@ model Piloto {
 
   @@map("tb_pilotos")
 }
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+}
