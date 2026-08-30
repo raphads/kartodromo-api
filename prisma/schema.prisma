@@ -25,3 +25,24 @@ model User {
   name      String?
   createdAt DateTime @default(now())
 }
+
+model Funcionario {
+  cpf      String   @id
+  nome     String
+  cargo    String
+  dataNasc DateTime
+  salario  Float
+  email    String
+  foto     String?
+}
+
+model Campeonato {
+  id         Int     @id @default(autoincrement())
+  nome       String  @unique
+  voltas     Int
+  fotoPista1 String?
+  fotoPista2 String?
+  fotoPista3 String?
+  fotoPista4 String?
+}
+

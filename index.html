@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Gestão de Pilotos</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f9; }
+    form { background: #fff; padding: 15px; border-radius: 5px; max-width: 400px; margin-bottom: 20px; }
+    input { display: block; width: 100%; margin-bottom: 10px; padding: 8px; box-sizing: border-box; }
+    button { padding: 10px 15px; background: #007bff; color: white; border: none; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; background: #fff; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+  </style>
+</head>
+<body>
+
+  <h2>Cadastrar / Atualizar Piloto</h2>
+  <form id="formPiloto">
+    <input type="text" id="cpf" placeholder="CPF" required>
+    <input type="text" id="nome" placeholder="Nome Completo" required>
+    <input type="date" id="dataNasc" required>
+    <input type="text" id="equipe" placeholder="Equipe">
+    <input type="number" id="idade" placeholder="Idade">
+    <input type="number" id="numero" placeholder="Número do Kart">
+    <button type="submit">Salvar Piloto</button>
+  </form>
+
+  <h2>Lista de Pilotos</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>CPF</th><th>Nome</th><th>Equipe</th><th>Idade</th><th>Número</th><th>Ações</th>
+      </tr>
+    </thead>
+    <tbody id="tabelaPilotos"></tbody>
+  </table>
+
+  <script>
+    const API_URL = 'http://localhost:3000/api/pilotos';
+
+    // 1. Listar Pilotos (GET)
+    async function carregarPilotos() {
+      const res = await fetch(API_URL);
+      const pilotos = await res.json();
+      
+      const tbody = document.getElementById('tabelaPilotos');
+      tbody.innerHTML = pilotos.map(p => `
+        <tr>
+          <td>${p.cpf}</td>
+          <td>${p.nome}</td>
+          <td>${p.equipe || '-'}</td>
+          <td>${p.idade}</td>
+          <td>${p.numero}</td>
+          <td><button onclick="deletarPiloto('${p.cpf}')" style="background:red;">Excluir</button></td>
+        </tr>
+      `).join('');
+    }
+
+    // 2. Salvar/Atualizar Piloto (POST)
+    document.getElementById('formPiloto').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const piloto = {
+        cpf: document.getElementById('cpf').value,
+        nome: document.getElementById('nome').value,
+        dataNasc: document.getElementById('dataNasc').value,
+        equipe: document.getElementById('equipe').value,
+        idade: Number(document.getElementById('idade').value),
+        numero: Number(document.getElementById('numero').value)
+      };
+
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(piloto)
+      });
+
+      e.target.reset();
+      carregarPilotos();
+    });
+
+    // 3. Excluir Piloto (DELETE)
+    async function deletarPiloto(cpf) {
+      if (confirm('Deseja excluir?')) {
+        await fetch(`${API_URL}/${cpf}`, { method: 'DELETE' });
+        carregarPilotos();
+      }
+    }
+
+    carregarPilotos();
+  </script>
+</body>
+</html>

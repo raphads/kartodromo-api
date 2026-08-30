@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { userRoutes } from '../routes/userRoutes.js';
+import { userRoutes } from './userRoutes.js';
 
 const routes = Router();
 
-routes.use('/users', userRoutes); // prefixo /users
+routes.use('/users', userRoutes); // prefixo /users -> /api/users
 
 export { routes };

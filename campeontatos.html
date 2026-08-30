@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadastro de Campeonatos - Kartódromo</title>
+  <style>
+    * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+    body { background-color: #f4f7f6; color: #333; padding: 20px; }
+    .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+    h2 { color: #1e293b; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; font-weight: 600; margin-bottom: 5px; color: #475569; }
+    input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+    button { background-color: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+    button:hover { background-color: #1d4ed8; }
+    table { width: 100%; border-collapse: collapse; margin-top: 30px; }
+    th, td { border: 1px solid #e2e8f0; padding: 10px; text-align: left; }
+    th { background-color: #f8fafc; font-weight: 600; }
+    .status-msg { margin-top: 15px; padding: 10px; border-radius: 6px; display: none; }
+    .success { background-color: #dcfce7; color: #166534; }
+    .error { background-color: #fee2e2; color: #991b1b; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h2>Cadastro de Campeonatos e Pistas</h2>
+
+    <form id="formCampeonato">
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="nome">Nome do Campeonato</label>
+          <input type="text" id="nome" required placeholder="Ex: Grand Prix 2026">
+        </div>
+        <div class="form-group">
+          <label for="voltas">Número de Voltas</label>
+          <input type="number" id="voltas" required min="1" placeholder="Ex: 15">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Fotos das Pistas (Caminho ou URL)</label>
+        <div class="grid-4">
+          <input type="text" id="fotoPista1" placeholder="Foto Pista 1">
+          <input type="text" id="fotoPista2" placeholder="Foto Pista 2">
+          <input type="text" id="fotoPista3" placeholder="Foto Pista 3">
+          <input type="text" id="fotoPista4" placeholder="Foto Pista 4">
+        </div>
+      </div>
+
+      <button type="submit">Salvar Campeonato</button>
+    </form>
+
+    <div id="mensagem" class="status-msg"></div>
+
+    <h2>Campeonatos Cadastrados</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nome</th>
+          <th>Voltas</th>
+          <th>Pistas</th>
+        </tr>
+      </thead>
+      <tbody id="tabelaCampeonatos">
+        <!-- Preenchido via JavaScript -->
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const API_URL = 'http://localhost:3000/api/campeonatos';
+
+    // Carrega a lista ao abrir a página
+    document.addEventListener('DOMContentLoaded', carregarCampeonatos);
+
+    // Submissão do Formulário
+    document.getElementById('formCampeonato').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const payload = {
+        nome: document.getElementById('nome').value,
+        voltas: Number(document.getElementById('voltas').value),
+        fotoPista1: document.getElementById('fotoPista1').value,
+        fotoPista2: document.getElementById('fotoPista2').value,
+        fotoPista3: document.getElementById('fotoPista3').value,
+        fotoPista4: document.getElementById('fotoPista4').value
+      };
+
+      try {
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          exibirMensagem('Campeonato salvo com sucesso!', 'success');
+          document.getElementById('formCampeonato').reset();
+          carregarCampeonatos();
+        } else {
+          const erro = await response.json();
+          exibirMensagem(`Erro: ${erro.error || 'Falha ao salvar'}`, 'error');
+        }
+      } catch (err) {
+        exibirMensagem('Erro de conexão com o servidor Node.js.', 'error');
+      }
+    });
+
+    // Buscar todos os campeonatos na API
+    async function carregarCampeonatos() {
+      try {
+        const response = await fetch(API_URL);
+        const campeonatos = await response.json();
+        
+        const tbody = document.getElementById('tabelaCampeonatos');
+        tbody.innerHTML = '';
+
+        campeonatos.forEach(c => {
+          const pistasCount = [c.fotoPista1, c.fotoPista2, c.fotoPista3, c.fotoPista4].filter(Boolean).length;
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${c.id}</td>
+            <td><strong>${c.nome}</strong></td>
+            <td>${c.voltas}</td>
+            <td>${pistasCount} foto(s) anexada(s)</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error('Erro ao listar campeonatos:', err);
+      }
+    }
+
+    function exibirMensagem(texto, tipo) {
+      const msgDiv = document.getElementById('mensagem');
+      msgDiv.textContent = texto;
+      msgDiv.className = `status-msg ${tipo}`;
+      msgDiv.style.display = 'block';
+      setTimeout(() => msgDiv.style.display = 'none', 4000);
+    }
+  </script>
+</body>
+</html>
