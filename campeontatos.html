@@ -13,8 +13,37 @@
     label { display: block; font-weight: 600; margin-bottom: 5px; color: #475569; }
     input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
-    button { background-color: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+    
+    /* Estilização dos Cards de Imagem */
+    .pista-card {
+      border: 2px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background-color: #f8fafc;
+    }
+    .pista-card:hover {
+      border-color: #2563eb;
+      background-color: #eff6ff;
+    }
+    .pista-img {
+      width: 100%;
+      height: 120px;
+      object-fit: cover;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .pista-card span {
+      font-size: 13px;
+      font-weight: 600;
+      color: #475569;
+    }
+
+    button { background-color: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; width: 100%; margin-top: 10px; }
     button:hover { background-color: #1d4ed8; }
     table { width: 100%; border-collapse: collapse; margin-top: 30px; }
     th, td { border: 1px solid #e2e8f0; padding: 10px; text-align: left; }
@@ -42,12 +71,41 @@
       </div>
 
       <div class="form-group">
-        <label>Fotos das Pistas (Caminho ou URL)</label>
+        <label>Fotos das Pistas (Clique na imagem para alterar)</label>
         <div class="grid-4">
-          <input type="text" id="fotoPista1" placeholder="Foto Pista 1">
-          <input type="text" id="fotoPista2" placeholder="Foto Pista 2">
-          <input type="text" id="fotoPista3" placeholder="Foto Pista 3">
-          <input type="text" id="fotoPista4" placeholder="Foto Pista 4">
+          
+          <!-- Pista 1 -->
+          <div class="pista-card" onclick="document.getElementById('filePista1').click()">
+            <img id="imgPista1" src="pista.png" alt="Pista 1" class="pista-img">
+            <span>Pista 1</span>
+            <input type="file" id="filePista1" accept="image/*" style="display: none;" onchange="atualizarImagem(this, 'imgPista1', 'pathPista1')">
+            <input type="hidden" id="pathPista1" value="pista.jpg">
+          </div>
+
+          <!-- Pista 2 -->
+          <div class="pista-card" onclick="document.getElementById('filePista2').click()">
+            <img id="imgPista2" src="pista.png" alt="Pista 2" class="pista-img">
+            <span>Pista 2</span>
+            <input type="file" id="filePista2" accept="image/*" style="display: none;" onchange="atualizarImagem(this, 'imgPista2', 'pathPista2')">
+            <input type="hidden" id="pathPista2" value="pista.jpg">
+          </div>
+
+          <!-- Pista 3 -->
+          <div class="pista-card" onclick="document.getElementById('filePista3').click()">
+            <img id="imgPista3" src="pista.png" alt="Pista 3" class="pista-img">
+            <span>Pista 3</span>
+            <input type="file" id="filePista3" accept="image/*" style="display: none;" onchange="atualizarImagem(this, 'imgPista3', 'pathPista3')">
+            <input type="hidden" id="pathPista3" value="pista.jpg">
+          </div>
+
+          <!-- Pista 4 -->
+          <div class="pista-card" onclick="document.getElementById('filePista4').click()">
+            <img id="imgPista4" src="pista.png" alt="Pista 4" class="pista-img">
+            <span>Pista 4</span>
+            <input type="file" id="filePista4" accept="image/*" style="display: none;" onchange="atualizarImagem(this, 'imgPista4', 'pathPista4')">
+            <input type="hidden" id="pathPista4" value="pista.jpg">
+          </div>
+
         </div>
       </div>
 
@@ -75,8 +133,24 @@
   <script>
     const API_URL = 'http://localhost:3000/api/campeonatos';
 
-    // Carrega a lista ao abrir a página
     document.addEventListener('DOMContentLoaded', carregarCampeonatos);
+
+    // Função para pré-visualizar a imagem escolhida e atualizar o valor do caminho
+    function atualizarImagem(input, imgElementId, pathElementId) {
+      if (input.files && input.files[0]) {
+        const file = input.files[0];
+        
+        // Atualiza o preview visual da imagem
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          document.getElementById(imgElementId).src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // Salva o nome/caminho do arquivo no campo oculto
+        document.getElementById(pathElementId).value = `fotos/pistas/${file.name}`;
+      }
+    }
 
     // Submissão do Formulário
     document.getElementById('formCampeonato').addEventListener('submit', async (e) => {
@@ -85,10 +159,10 @@
       const payload = {
         nome: document.getElementById('nome').value,
         voltas: Number(document.getElementById('voltas').value),
-        fotoPista1: document.getElementById('fotoPista1').value,
-        fotoPista2: document.getElementById('fotoPista2').value,
-        fotoPista3: document.getElementById('fotoPista3').value,
-        fotoPista4: document.getElementById('fotoPista4').value
+        fotoPista1: document.getElementById('pathPista1').value,
+        fotoPista2: document.getElementById('pathPista2').value,
+        fotoPista3: document.getElementById('pathPista3').value,
+        fotoPista4: document.getElementById('pathPista4').value
       };
 
       try {
@@ -100,7 +174,7 @@
 
         if (response.ok) {
           exibirMensagem('Campeonato salvo com sucesso!', 'success');
-          document.getElementById('formCampeonato').reset();
+          resetarFormulario();
           carregarCampeonatos();
         } else {
           const erro = await response.json();
@@ -110,6 +184,15 @@
         exibirMensagem('Erro de conexão com o servidor Node.js.', 'error');
       }
     });
+
+    // Função para restaurar o formulário ao estado inicial
+    function resetarFormulario() {
+      document.getElementById('formCampeonato').reset();
+      for (let i = 1; i <= 4; i++) {
+        document.getElementById(`imgPista${i}`).src = 'pista.jpg';
+        document.getElementById(`pathPista${i}`).value = 'pista.jpg';
+      }
+    }
 
     // Buscar todos os campeonatos na API
     async function carregarCampeonatos() {
@@ -127,7 +210,7 @@
             <td>${c.id}</td>
             <td><strong>${c.nome}</strong></td>
             <td>${c.voltas}</td>
-            <td>${pistasCount} foto(s) anexada(s)</td>
+            <td>${pistasCount} foto(s) cadastradas</td>
           `;
           tbody.appendChild(tr);
         });
