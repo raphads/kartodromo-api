@@ -264,6 +264,74 @@ app.put('/api/campeonatos/:nome', upload.fields([
   }
 });
 
+// Rota para cadastro de novos usuários
+app.post('/api/usuarios', async (req: any, res: any) => {
+  try {
+    const { usuario, email, senha } = req.body;
+
+    if (!usuario || !email || !senha) {
+      return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    }
+
+    // Verifica se usuário ou e-mail já foram cadastrados
+    const existente = await prisma.usuario.findFirst({
+      where: {
+        OR: [{ usuario }, { email }]
+      }
+    });
+
+    if (existente) {
+      return res.status(400).json({ error: 'Nome de usuário ou e-mail já em uso' });
+    }
+
+    // Cria o novo registro no banco de dados
+    const novoUsuario = await prisma.usuario.create({
+      data: {
+        usuario,
+        email,
+        senha // Dica: Em produção, use o pacote 'bcrypt' para criptografar a senha antes de salvar
+      }
+    });
+
+    return res.status(201).json(novoUsuario);
+  } catch (error) {
+    return res.status(500).json({ error: 'Erro ao cadastrar usuário' });
+  }
+});
+
+// Rota de Login / Autenticação
+app.post('/api/login', async (req: any, res: any) => {
+  try {
+    const { usuario, senha } = req.body;
+
+    if (!usuario || !senha) {
+      return res.status(400).json({ error: 'Usuário e senha são obrigatórios' });
+    }
+
+    // Busca o usuário pelo nome cadastrado
+    const userFound = await prisma.usuario.findFirst({
+      where: { usuario }
+    });
+
+    // Se o usuário não existir ou a senha estiver incorreta
+    if (!userFound || userFound.senha !== senha) {
+      return res.status(401).json({ error: 'Usuário ou senha inválidos' });
+    }
+
+    // Retorna os dados do usuário autenticado (omitindo a senha por segurança)
+    const { senha: _, ...usuarioSemSenha } = userFound;
+
+    return res.json({
+      message: 'Autenticado com sucesso',
+      usuario: usuarioSemSenha
+    });
+
+  } catch (error) {
+    console.error('ERRO DETALHADO NO SERVIDOR:', error);
+    return res.status(500).json({ error: 'Erro interno ao processar o login' });
+  }
+});
+
 // -------------------------------------------------------------
 // Inicialização da API
 // -------------------------------------------------------------

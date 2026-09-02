@@ -25,6 +25,13 @@ model User {
   name      String?
   createdAt DateTime @default(now())
 }
+model Usuario
+ { 
+  id Int @id @default(autoincrement()); 
+ usuario String @unique; 
+ email String @unique; 
+ senha String 
+ }
 
 model Funcionario {
   cpf      String   @id
