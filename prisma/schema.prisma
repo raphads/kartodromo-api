@@ -25,12 +25,11 @@ model User {
   name      String?
   createdAt DateTime @default(now())
 }
-model Usuario
- { 
-  id Int @id @default(autoincrement()); 
- usuario String @unique; 
- email String @unique; 
- senha String 
+model Usuario { 
+id Int @id @default(autoincrement())
+ usuario String @unique
+ email String @unique
+ senha String
  }
 
 model Funcionario {
@@ -46,10 +45,12 @@ model Funcionario {
 model Campeonato {
   id         Int     @id @default(autoincrement())
   nome       String  @unique
+  data       DateTime? @map("data_campeonato") // <- CAMPO DE DATA ADICIONADO
   voltas     Int
   fotoPista1 String?
   fotoPista2 String?
   fotoPista3 String?
   fotoPista4 String?
+
 }
 
