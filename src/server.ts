@@ -171,55 +171,42 @@ app.delete('/api/funcionarios/:cpf', async (req, res) => {
 // -------------------------------------------------------------
 // Rotas de Campeonatos (Unificada para Upload e JSON)
 // -------------------------------------------------------------
-app.get('/api/campeonatos', async (req, res) => {
+// 1. CADASTRAR CAMPEONATO (POST)
+app.post('/api/campeonatos', async (req, res) => {
   try {
-    const campeonatos = await prisma.campeonato.findMany();
-    return res.json(campeonatos);
-  } catch (error) {
-    return res.status(500).json({ error: 'Erro ao buscar campeonatos' });
-  }
-});
+    const { nome, voltas, data, fotoPista1, fotoPista2, fotoPista3, fotoPista4 } = req.body;
 
-app.get('/api/campeonatos/:nome', async (req, res) => {
-  try {
-    const { nome } = req.params;
-    const campeonato = await prisma.campeonato.findUnique({ where: { nome } });
-    if (!campeonato) return res.status(404).json({ error: 'Campeonato não encontrado' });
-    return res.json(campeonato);
-  } catch (error) {
-    return res.status(500).json({ error: 'Erro ao buscar campeonato' });
-  }
-});
-
-// Rota POST híbrida: aceita upload multipart (HTML) ou JSON com strings de caminho (VB.NET)
-app.post('/api/campeonatos', upload.fields([
-  { name: 'fotoPista1', maxCount: 1 },
-  { name: 'fotoPista2', maxCount: 1 },
-  { name: 'fotoPista3', maxCount: 1 },
-  { name: 'fotoPista4', maxCount: 1 },
-]), async (req: any, res: any) => {
-  try {
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-    const { nome, voltas, fotoPista1: bodyPista1, fotoPista2: bodyPista2, fotoPista3: bodyPista3, fotoPista4: bodyPista4 } = req.body;
-
-    // Prioriza o arquivo enviado por upload; se não houver, usa a string enviada no body
-    const fotoPista1 = files?.['fotoPista1']?.[0] ? `/uploads/pistas/${files['fotoPista1'][0].filename}` : (bodyPista1 || null);
-    const fotoPista2 = files?.['fotoPista2']?.[0] ? `/uploads/pistas/${files['fotoPista2'][0].filename}` : (bodyPista2 || null);
-    const fotoPista3 = files?.['fotoPista3']?.[0] ? `/uploads/pistas/${files['fotoPista3'][0].filename}` : (bodyPista3 || null);
-    const fotoPista4 = files?.['fotoPista4']?.[0] ? `/uploads/pistas/${files['fotoPista4'][0].filename}` : (bodyPista4 || null);
-
-    const campeonato = await prisma.campeonato.upsert({
-      where: { nome },
-      update: { voltas: Number(voltas), fotoPista1, fotoPista2, fotoPista3, fotoPista4 },
-      create: { nome, voltas: Number(voltas), fotoPista1, fotoPista2, fotoPista3, fotoPista4 },
+    const novoCampeonato = await prisma.campeonato.create({
+      data: {
+        nome,
+        voltas: Number(voltas),
+        // Converte a string 'YYYY-MM-DD' recebida do HTML para DateTime do Prisma
+        data: new Date(data),
+        fotoPista1,
+        fotoPista2,
+        fotoPista3,
+        fotoPista4
+      }
     });
 
-    return res.json(campeonato);
+    res.status(201).json(novoCampeonato);
   } catch (error) {
-    return res.status(400).json({ error: 'Erro ao salvar campeonato' });
+    console.error('Erro ao cadastrar campeonato:', error);
+    res.status(400).json({ error: 'Erro ao cadastrar campeonato. Nome pode já existir.' });
   }
 });
 
+// 2. LISTAR CAMPEONATOS (GET)
+app.get('/api/campeonatos', async (req, res) => {
+  try {
+    const campeonatos = await prisma.campeonato.findMany({
+      orderBy: { data: 'desc' } // Traz os campeonatos mais recentes primeiro
+    });
+    res.json(campeonatos);
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao buscar campeonatos' });
+  }
+});
 
 // Rota PUT para atualizar dados e imagens de um campeonato
 app.put('/api/campeonatos/:nome', upload.fields([
