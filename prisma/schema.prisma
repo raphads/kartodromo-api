@@ -12,7 +12,7 @@ model Piloto {
   nome     String   @map("nome_piloto")
   dataNasc DateTime @map("data_nasc_piloto")
   equipe   String   @map("equipe_piloto")
-  idade    Int      @map("idade_piloto")
+  idade    Int?      @map("idade_piloto")
   numero   Int      @map("numero_piloto")
   foto     String?  @map("foto_piloto")
 
@@ -33,13 +33,20 @@ id Int @id @default(autoincrement())
  }
 
 model Funcionario {
-  cpf      String   @id
-  nome     String
-  cargo    String
-  dataNasc DateTime
-  salario  Float
-  email    String
-  foto     String?
+  cpf        String   @id
+  nome       String
+  cargo      String
+  dataNasc   DateTime
+  dataAdmissao DateTime?
+  salario    Float
+  email      String
+  foto       String?
+  cep        String?
+  logradouro String?
+  numero     String?
+  bairro     String?
+  cidade     String?
+  uf         String?
 }
 
 model Campeonato {

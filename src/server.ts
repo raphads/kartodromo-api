@@ -130,33 +130,57 @@ app.get('/api/funcionarios/:cpf', async (req, res) => {
 });
 
 app.post('/api/funcionarios', async (req, res) => {
-  const { cpf, nome, cargo, dataNasc, salario, email, foto } = req.body;
+  const { 
+    cpf, nome, cargo, dataNasc, salario, email, foto,
+    cep, logradouro, numero, bairro, cidade, uf 
+  } = req.body;
+
+  // Conversão e validação segura da data
+  const dataValida = new Date(dataNasc);
+  if (!dataNasc || isNaN(dataValida.getTime())) {
+    return res.status(400).json({ error: 'Data de nascimento inválida ou não informada.' });
+  }
+
   try {
     const novoFuncionario = await prisma.funcionario.upsert({
       where: { cpf },
       update: {
         nome,
         cargo,
-        dataNasc: new Date(dataNasc),
+        dataNasc: dataValida,
         salario: Number(salario),
         email,
         foto,
+        cep,
+        logradouro,
+        numero,
+        bairro,
+        cidade,
+        uf,
       },
       create: {
         cpf,
         nome,
         cargo,
-        dataNasc: new Date(dataNasc),
+        dataNasc: dataValida,
         salario: Number(salario),
         email,
         foto,
+        cep,
+        logradouro,
+        numero,
+        bairro,
+        cidade,
+        uf,
       },
     });
     return res.status(201).json(novoFuncionario);
   } catch (error) {
-    return res.status(400).json({ error: 'Erro ao salvar funcionário' });
+    console.error('Erro ao salvar funcionário:', error);
+    return res.status(400).json({ error: 'Erro ao salvar funcionário no banco de dados.' });
   }
 });
+
 
 app.delete('/api/funcionarios/:cpf', async (req, res) => {
   const { cpf } = req.params;
@@ -167,6 +191,7 @@ app.delete('/api/funcionarios/:cpf', async (req, res) => {
     return res.status(400).json({ error: 'Erro ao deletar funcionário' });
   }
 });
+
 
 // -------------------------------------------------------------
 // Rotas de Campeonatos (Unificada para Upload e JSON)
@@ -200,7 +225,9 @@ app.post('/api/campeonatos', async (req, res) => {
 app.get('/api/campeonatos', async (req, res) => {
   try {
     const campeonatos = await prisma.campeonato.findMany({
-      orderBy: { data: 'desc' } // Traz os campeonatos mais recentes primeiro
+      orderBy: {
+        id: 'asc' // 'asc' para ordem crescente (1, 2, 3...) ou 'desc' para decrescente
+      }
     });
     res.json(campeonatos);
   } catch (error) {
