@@ -61,3 +61,21 @@ model Campeonato {
 
 }
 
+model Historico {
+  id             Int      @id @default(autoincrement())
+  nomeCampeonato String   @map("nome_campeonato")
+  numeroVoltas   Int      @map("numero_voltas")
+  nomePrimeiro   String?  @map("nome_primeiro")
+  fotoPrimeiro   String?  @map("foto_primeiro")
+  nomeSegundo    String?  @map("nome_segundo")
+  fotoSegundo    String?  @map("foto_segundo")
+  nomeTerceiro   String?  @map("nome_terceiro")
+  fotoTerceiro   String?  @map("foto_terceiro")
+  pista1         String?
+  pista2         String?
+  pista3         String?
+  pista4         String?
+  createdAt      DateTime @default(now())
+
+  @@map("tb_historico")
+}

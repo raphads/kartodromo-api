@@ -131,15 +131,18 @@ app.get('/api/funcionarios/:cpf', async (req, res) => {
 
 app.post('/api/funcionarios', async (req, res) => {
   const { 
-    cpf, nome, cargo, dataNasc, salario, email, foto,
+    cpf, nome, cargo, dataNasc, dataAdmissao, salario, email, foto,
     cep, logradouro, numero, bairro, cidade, uf 
   } = req.body;
 
-  // Conversão e validação segura da data
-  const dataValida = new Date(dataNasc);
-  if (!dataNasc || isNaN(dataValida.getTime())) {
+  // Conversão e validação da data de nascimento
+  const dataNascValida = new Date(dataNasc);
+  if (!dataNasc || isNaN(dataNascValida.getTime())) {
     return res.status(400).json({ error: 'Data de nascimento inválida ou não informada.' });
   }
+
+  // Tratamento da data de admissão (opcional)
+  const dataAdmissaoValida = dataAdmissao ? new Date(dataAdmissao) : null;
 
   try {
     const novoFuncionario = await prisma.funcionario.upsert({
@@ -147,7 +150,8 @@ app.post('/api/funcionarios', async (req, res) => {
       update: {
         nome,
         cargo,
-        dataNasc: dataValida,
+        dataNasc: dataNascValida,
+        dataAdmissao: dataAdmissaoValida, // 👈 Atualizado
         salario: Number(salario),
         email,
         foto,
@@ -162,7 +166,8 @@ app.post('/api/funcionarios', async (req, res) => {
         cpf,
         nome,
         cargo,
-        dataNasc: dataValida,
+        dataNasc: dataNascValida,
+        dataAdmissao: dataAdmissaoValida, // 👈 Criado
         salario: Number(salario),
         email,
         foto,
@@ -345,6 +350,30 @@ app.post('/api/login', async (req: any, res: any) => {
     console.error('ERRO DETALHADO NO SERVIDOR:', error);
     
     return res.status(500).json({ error: 'Erro interno ao processar o login' });
+  }
+});
+
+
+
+// GET /api/historico -> Listar histórico
+app.get('/api/historico', async (req, res) => {
+  try {
+    const historico = await prisma.historico.findMany({
+      orderBy: { id: 'desc' }
+    });
+    return res.json(historico);
+  } catch (error) {
+    return res.status(500).json({ error: 'Erro ao buscar histórico' });
+  }
+});
+
+// POST /api/historico -> Gravar corrida no histórico
+app.post('/api/historico', async (req, res) => {
+  try {
+    const novoRegistro = await prisma.historico.create({ data: req.body });
+    return res.status(201).json(novoRegistro);
+  } catch (error) {
+    return res.status(400).json({ error: 'Erro ao salvar histórico' });
   }
 });
 
