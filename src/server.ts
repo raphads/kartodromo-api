@@ -367,13 +367,53 @@ app.get('/api/historico', async (req, res) => {
   }
 });
 
-// POST /api/historico -> Gravar corrida no histórico
+// POST /api/historico -> Gravar corrida no histórico buscando voltas e fotos automaticamente
 app.post('/api/historico', async (req, res) => {
   try {
-    const novoRegistro = await prisma.historico.create({ data: req.body });
+    const { nomeCampeonato, nomePrimeiro, nomeSegundo, nomeTerceiro } = req.body;
+
+    if (!nomeCampeonato || !nomePrimeiro || !nomeSegundo || !nomeTerceiro) {
+      return res.status(400).json({ error: 'Todos os campos do pódio são obrigatórios.' });
+    }
+
+    // 1. Busca os dados do campeonato para obter número de voltas e fotos das pistas
+    const campeonato = await prisma.campeonato.findUnique({
+      where: { nome: nomeCampeonato }
+    });
+
+    if (!campeonato) {
+      return res.status(404).json({ error: 'Campeonato não encontrado.' });
+    }
+
+    // 2. Busca os dados dos pilotos selecionados para salvar as fotos no histórico
+    const [piloto1, piloto2, piloto3] = await Promise.all([
+      prisma.piloto.findFirst({ where: { nome: nomePrimeiro } }),
+      prisma.piloto.findFirst({ where: { nome: nomeSegundo } }),
+      prisma.piloto.findFirst({ where: { nome: nomeTerceiro } })
+    ]);
+
+    // 3. Salva a corrida completa na tabela tb_historico
+    const novoRegistro = await prisma.historico.create({
+      data: {
+        nomeCampeonato: campeonato.nome,
+        numeroVoltas: campeonato.voltas,
+        nomePrimeiro,
+        fotoPrimeiro: piloto1?.foto || null,
+        nomeSegundo,
+        fotoSegundo: piloto2?.foto || null,
+        nomeTerceiro,
+        fotoTerceiro: piloto3?.foto || null,
+        pista1: campeonato.fotoPista1,
+        pista2: campeonato.fotoPista2,
+        pista3: campeonato.fotoPista3,
+        pista4: campeonato.fotoPista4,
+      }
+    });
+
     return res.status(201).json(novoRegistro);
   } catch (error) {
-    return res.status(400).json({ error: 'Erro ao salvar histórico' });
+    console.error('Erro ao salvar histórico:', error);
+    return res.status(500).json({ error: 'Erro ao salvar pódio no banco de dados.' });
   }
 });
 
