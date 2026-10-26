@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite" // Pode mudar para "postgresql", "mysql" ou "sqlserver"
-  url      = "file:./kartodromo.db"
+  provider = "postgresql" // Pode mudar para "sqlite", "mysql" ou "sqlserver"
+  //url      = "file:./kartodromo.db"
+  url      = env("DATABASE_URL")
 }
 
 model Piloto {
