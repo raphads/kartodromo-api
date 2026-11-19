@@ -310,6 +310,7 @@ app.post('/api/usuarios', async (req: any, res: any) => {
         usuario,
         email,
         senha // Dica: Em produção, use o pacote 'bcrypt' para criptografar a senha antes de salvar
+      
       }
     });
 
@@ -414,6 +415,153 @@ app.post('/api/historico', async (req, res) => {
   } catch (error) {
     console.error('Erro ao salvar histórico:', error);
     return res.status(500).json({ error: 'Erro ao salvar pódio no banco de dados.' });
+  }
+});
+
+// -------------------------------------------------------------
+// Rota do Assistente / Bot (Regras do Banco + Fallback LLM)
+// -------------------------------------------------------------
+app.post('/api/bot', async (req, res) => {
+  try {
+    const mensagemOriginal = (req.body?.mensagem || '').trim();
+    const pergunta = mensagemOriginal.toLowerCase();
+
+    if (!pergunta) {
+      return res.json({
+        resposta: 'Pergunte sobre campeonatos, pilotos, funcionários ou histórico de pódios!'
+      });
+    }
+
+    // 1. Regra: Campeonatos e pistas
+    if (
+      pergunta.includes('campeonato') ||
+      pergunta.includes('pista') ||
+      pergunta.includes('volta') ||
+      pergunta.includes('voltas')
+    ) {
+      const campeonatos = await prisma.campeonato.findMany({
+        orderBy: { id: 'desc' },
+        take: 4
+      });
+
+      if (!campeonatos.length) {
+        return res.json({ resposta: 'Ainda não há campeonatos cadastrados no sistema.' });
+      }
+
+      const lista = campeonatos
+        .map(c => {
+          const dataFmt = c.data ? new Date(c.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
+          return `• ${c.nome} — ${c.voltas} voltas${dataFmt ? ` (${dataFmt})` : ''}`;
+        })
+        .join('\n');
+
+      return res.json({ resposta: `Campeonatos cadastrados:\n${lista}` });
+    }
+
+    // 2. Regra: Pilotos e karts
+    if (
+      pergunta.includes('piloto') ||
+      pergunta.includes('kart') ||
+      pergunta.includes('equipe')
+    ) {
+      const pilotos = await prisma.piloto.findMany({ take: 6 });
+
+      if (!pilotos.length) {
+        return res.json({ resposta: 'Nenhum piloto cadastrado até o momento.' });
+      }
+
+      const lista = pilotos
+        .map(p => `• ${p.nome} (Kart #${p.numero}${p.equipe ? ` - ${p.equipe}` : ''})`)
+        .join('\n');
+
+      return res.json({ resposta: `Pilotos no sistema:\n${lista}` });
+    }
+
+    // 3. Regra: Pódio e histórico de corridas
+    if (
+      pergunta.includes('podio') ||
+      pergunta.includes('pódio') ||
+      pergunta.includes('historico') ||
+      pergunta.includes('histórico') ||
+      pergunta.includes('corrida') ||
+      pergunta.includes('vencedor') ||
+      pergunta.includes('campeão') ||
+      pergunta.includes('campeao')
+    ) {
+      const corridas = await prisma.historico.findMany({
+        orderBy: { id: 'desc' },
+        take: 3
+      });
+
+      if (!corridas.length) {
+        return res.json({ resposta: 'Ainda não há corridas gravadas no histórico.' });
+      }
+
+      const lista = corridas
+        .map(h => `• ${h.nomeCampeonato} (${h.numeroVoltas} voltas): 1º ${h.nomePrimeiro}, 2º ${h.nomeSegundo}, 3º ${h.nomeTerceiro}`)
+        .join('\n');
+
+      return res.json({ resposta: `Últimos pódios registrados:\n${lista}` });
+    }
+
+    // 4. Fallback seguro para LLM (só roda se GEMINI_API_KEY estiver configurada)
+    if (process.env.GEMINI_API_KEY) {
+      try {
+        const [totalPilotos, totalCampeonatos, ultimosPodios] = await Promise.all([
+          prisma.piloto.count(),
+          prisma.campeonato.count(),
+          prisma.historico.findMany({ orderBy: { id: 'desc' }, take: 3 })
+        ]);
+
+        const resumoSistema = [
+          `Total de pilotos: ${totalPilotos}`,
+          `Total de campeonatos: ${totalCampeonatos}`,
+          `Últimos pódios: ${
+            ultimosPodios.length
+              ? ultimosPodios.map(h => `${h.nomeCampeonato} (1º ${h.nomePrimeiro}, 2º ${h.nomeSegundo}, 3º ${h.nomeTerceiro})`).join('; ')
+              : 'nenhum'
+          }`
+        ].join(' | ');
+
+        const llmRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    {
+                      text: `Você é o assistente do sistema À la Kart (Kartódromo de Mauá). Responda em português, de forma curta e objetiva, usando apenas estes dados do sistema quando relevante: ${resumoSistema}. Pergunta do usuário: ${mensagemOriginal}`
+                    }
+                  ]
+                }
+              ]
+            })
+          }
+        );
+
+        if (llmRes.ok) {
+          const llmData = await llmRes.json();
+          const textoGerado = llmData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (textoGerado) {
+            return res.json({ resposta: textoGerado });
+          }
+        }
+      } catch (llmErr) {
+        console.warn('Fallback LLM falhou, usando resposta padrão:', llmErr.message);
+      }
+    }
+
+    // 5. Fallback local final (garante resposta mesmo sem LLM ou com erro externo)
+    return res.json({
+      resposta:
+        'Posso consultar dados reais do sistema para você. Tente perguntar sobre "campeonatos", "pilotos" ou "histórico de pódios".'
+    });
+  } catch (error) {
+    console.error('Erro na rota /api/bot:', error);
+    return res.status(500).json({ error: 'Erro ao processar consulta do assistente.' });
   }
 });
 
