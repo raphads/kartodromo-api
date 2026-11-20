@@ -684,6 +684,41 @@ app.get('/api/ranking', async (req, res) => {
   }
 });
 
+// -------------------------------------------------------------
+// Rotas do Chat Comunitário (Mural Persistente)
+// -------------------------------------------------------------
+app.get('/api/chat', async (req, res) => {
+  try {
+    const mensagens = await prisma.mensagem.findMany({
+      orderBy: { id: 'asc' },
+      take: 50
+    });
+    return res.json(mensagens);
+  } catch (error) {
+    console.error('Erro ao buscar mensagens:', error);
+    return res.status(500).json({ error: 'Erro ao carregar mensagens.' });
+  }
+});
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const autor = (req.body?.autor || 'Anônimo').trim().slice(0, 40);
+    const texto = (req.body?.texto || '').trim().slice(0, 500);
+
+    if (!texto) {
+      return res.status(400).json({ error: 'A mensagem não pode estar vazia.' });
+    }
+
+    const novaMensagem = await prisma.mensagem.create({
+      data: { autor, texto }
+    });
+
+    return res.status(201).json(novaMensagem);
+  } catch (error) {
+    console.error('Erro ao salvar mensagem:', error);
+    return res.status(500).json({ error: 'Erro ao salvar mensagem.' });
+  }
+});
 
 // -------------------------------------------------------------
 // Inicialização da API

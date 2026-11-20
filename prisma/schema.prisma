@@ -80,3 +80,12 @@ model Historico {
 
   @@map("tb_historico")
 }
+
+model Mensagem {
+  id        Int      @id @default(autoincrement())
+  autor     String
+  texto     String
+  criadoEm  DateTime @default(now())
+
+  @@map("tb_mensagens")
+}
