@@ -702,15 +702,31 @@ app.get('/api/chat', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const autor = (req.body?.autor || 'Anônimo').trim().slice(0, 40);
+    const usuarioId = Number(req.body?.usuarioId);
     const texto = (req.body?.texto || '').trim().slice(0, 500);
+
+    if (!usuarioId) {
+      return res.status(401).json({ error: 'Faça login para enviar mensagens no chat.' });
+    }
 
     if (!texto) {
       return res.status(400).json({ error: 'A mensagem não pode estar vazia.' });
     }
 
+    const userFound = await prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { id: true, usuario: true }
+    });
+
+    if (!userFound) {
+      return res.status(401).json({ error: 'Sessão inválida. Faça login novamente.' });
+    }
+
     const novaMensagem = await prisma.mensagem.create({
-      data: { autor, texto }
+      data: {
+        autor: userFound.usuario,
+        texto
+      }
     });
 
     return res.status(201).json(novaMensagem);
