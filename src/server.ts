@@ -284,6 +284,31 @@ app.put('/api/campeonatos/:nome', upload.fields([
   }
 });
 
+// 4. EXCLUIR CAMPEONATO (DELETE)
+app.delete('/api/campeonatos/:identificador', async (req, res) => {
+  try {
+    const identificador = decodeURIComponent(req.params.identificador);
+    const idNumerico = Number(identificador);
+
+    const whereClause =
+      Number.isInteger(idNumerico) && String(idNumerico) === identificador
+        ? { id: idNumerico }
+        : { nome: identificador };
+
+    await prisma.campeonato.delete({
+      where: whereClause,
+    });
+
+    return res.status(204).send();
+  } catch (error: any) {
+    if (error?.code === 'P2025') {
+      return res.status(404).json({ error: 'Campeonato não encontrado' });
+    }
+    console.error('Erro ao excluir campeonato:', error);
+    return res.status(400).json({ error: 'Erro ao excluir campeonato' });
+  }
+});
+
 // Rota para cadastro de novos usuários
 app.post('/api/usuarios', async (req: any, res: any) => {
   try {
