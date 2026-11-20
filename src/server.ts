@@ -428,11 +428,50 @@ app.post('/api/bot', async (req, res) => {
 
     if (!pergunta) {
       return res.json({
-        resposta: 'Pergunte sobre campeonatos, pilotos, funcionários ou histórico de pódios!'
+        resposta: 'Pergunte sobre campeonatos, pilotos, ranking ou histórico de pódios!'
       });
     }
 
-    // 1. Regra: Campeonatos e pistas
+    // Busca pilotos ativos para filtrar excluídos
+    const pilotosAtivos = await prisma.piloto.findMany();
+    const nomesAtivos = new Set(pilotosAtivos.map(p => p.nome));
+
+    // 1. Regra: Ranking / Classificação (apenas pilotos ativos)
+    if (
+      pergunta.includes('ranking') ||
+      pergunta.includes('classificacao') ||
+      pergunta.includes('classificação') ||
+      pergunta.includes('pontos')
+    ) {
+      const historico = await prisma.historico.findMany();
+      const pts = {};
+
+      historico.forEach(h => {
+        if (h.nomePrimeiro && nomesAtivos.has(h.nomePrimeiro)) {
+          pts[h.nomePrimeiro] = (pts[h.nomePrimeiro] || 0) + 25;
+        }
+        if (h.nomeSegundo && nomesAtivos.has(h.nomeSegundo)) {
+          pts[h.nomeSegundo] = (pts[h.nomeSegundo] || 0) + 18;
+        }
+        if (h.nomeTerceiro && nomesAtivos.has(h.nomeTerceiro)) {
+          pts[h.nomeTerceiro] = (pts[h.nomeTerceiro] || 0) + 15;
+        }
+      });
+
+      const top = Object.entries(pts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([nome, p], i) => `${i + 1}º ${nome} — ${p} pts`)
+        .join('\n');
+
+      if (!top) {
+        return res.json({ resposta: 'Ainda não há pilotos ativos pontuando no ranking.' });
+      }
+
+      return res.json({ resposta: `🏆 Ranking Geral (pilotos ativos):\n${top}` });
+    }
+
+    // 2. Regra: Campeonatos e pistas
     if (
       pergunta.includes('campeonato') ||
       pergunta.includes('pista') ||
@@ -458,26 +497,25 @@ app.post('/api/bot', async (req, res) => {
       return res.json({ resposta: `Campeonatos cadastrados:\n${lista}` });
     }
 
-    // 2. Regra: Pilotos e karts
+    // 3. Regra: Pilotos e karts
     if (
       pergunta.includes('piloto') ||
       pergunta.includes('kart') ||
       pergunta.includes('equipe')
     ) {
-      const pilotos = await prisma.piloto.findMany({ take: 6 });
-
-      if (!pilotos.length) {
+      if (!pilotosAtivos.length) {
         return res.json({ resposta: 'Nenhum piloto cadastrado até o momento.' });
       }
 
-      const lista = pilotos
+      const lista = pilotosAtivos
+        .slice(0, 8)
         .map(p => `• ${p.nome} (Kart #${p.numero}${p.equipe ? ` - ${p.equipe}` : ''})`)
         .join('\n');
 
-      return res.json({ resposta: `Pilotos no sistema:\n${lista}` });
+      return res.json({ resposta: `Pilotos ativos no sistema:\n${lista}` });
     }
 
-    // 3. Regra: Pódio e histórico de corridas
+    // 4. Regra: Pódio e histórico de corridas (filtrando excluídos)
     if (
       pergunta.includes('podio') ||
       pergunta.includes('pódio') ||
@@ -497,52 +535,45 @@ app.post('/api/bot', async (req, res) => {
         return res.json({ resposta: 'Ainda não há corridas gravadas no histórico.' });
       }
 
+      const formatarPiloto = (nome) => (nomesAtivos.has(nome) ? nome : '(piloto inativo)');
+
       const lista = corridas
-        .map(h => `• ${h.nomeCampeonato} (${h.numeroVoltas} voltas): 1º ${h.nomePrimeiro}, 2º ${h.nomeSegundo}, 3º ${h.nomeTerceiro}`)
+        .map(
+          h =>
+            `• ${h.nomeCampeonato} (${h.numeroVoltas} voltas): 1º ${formatarPiloto(h.nomePrimeiro)}, 2º ${formatarPiloto(h.nomeSegundo)}, 3º ${formatarPiloto(h.nomeTerceiro)}`
+        )
         .join('\n');
 
       return res.json({ resposta: `Últimos pódios registrados:\n${lista}` });
     }
 
-    // Regra: Ranking / Classificação
-    if (pergunta.includes('ranking') || pergunta.includes('classificacao') || pergunta.includes('classificação') || pergunta.includes('pontos')) {
-      const historico = await prisma.historico.findMany();
-      if (!historico.length) {
-        return res.json({ resposta: 'Ainda não há corridas no histórico para gerar o ranking.' });
-      }
-      const pts = {};
-      historico.forEach(h => {
-        if (h.nomePrimeiro) pts[h.nomePrimeiro] = (pts[h.nomePrimeiro] || 0) + 25;
-        if (h.nomeSegundo) pts[h.nomeSegundo] = (pts[h.nomeSegundo] || 0) + 18;
-        if (h.nomeTerceiro) pts[h.nomeTerceiro] = (pts[h.nomeTerceiro] || 0) + 15;
-      });
-      const top = Object.entries(pts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([nome, p], i) => `${i + 1}º ${nome} — ${p} pts`)
-        .join('\n');
-      return res.json({ resposta: `🏆 Ranking Geral:\n${top}` });
-    }
-
-  // 4. Fallback seguro para LLM
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn('⚠️ GEMINI_API_KEY não encontrada no ambiente!');
-    } else {
+    // 5. Fallback seguro para LLM (passando apenas pilotos ativos no contexto)
+    if (process.env.GEMINI_API_KEY) {
       try {
-        const [totalPilotos, totalCampeonatos, ultimosPodios] = await Promise.all([
-          prisma.piloto.count(),
+        const [totalCampeonatos, ultimosPodios] = await Promise.all([
           prisma.campeonato.count(),
           prisma.historico.findMany({ orderBy: { id: 'desc' }, take: 3 })
         ]);
 
+        const podiosFiltrados = ultimosPodios.map(h => {
+          const p1 = nomesAtivos.has(h.nomePrimeiro) ? h.nomePrimeiro : null;
+          const p2 = nomesAtivos.has(h.nomeSegundo) ? h.nomeSegundo : null;
+          const p3 = nomesAtivos.has(h.nomeTerceiro) ? h.nomeTerceiro : null;
+          const ativosNoPodio = [
+            p1 ? `1º ${p1}` : null,
+            p2 ? `2º ${p2}` : null,
+            p3 ? `3º ${p3}` : null
+          ].filter(Boolean);
+
+          return ativosNoPodio.length
+            ? `${h.nomeCampeonato} (${ativosNoPodio.join(', ')})`
+            : null;
+        }).filter(Boolean);
+
         const resumoSistema = [
-          `Total de pilotos: ${totalPilotos}`,
+          `Pilotos ativos (${pilotosAtivos.length}): ${pilotosAtivos.map(p => p.nome).join(', ') || 'nenhum'}`,
           `Total de campeonatos: ${totalCampeonatos}`,
-          `Últimos pódios: ${
-            ultimosPodios.length
-              ? ultimosPodios.map(h => `${h.nomeCampeonato} (1º ${h.nomePrimeiro}, 2º ${h.nomeSegundo}, 3º ${h.nomeTerceiro})`).join('; ')
-              : 'nenhum'
-          }`
+          `Pódios com pilotos ativos: ${podiosFiltrados.length ? podiosFiltrados.join('; ') : 'nenhum'}`
         ].join(' | ');
 
         const llmRes = await fetch(
@@ -555,7 +586,7 @@ app.post('/api/bot', async (req, res) => {
                 {
                   parts: [
                     {
-                      text: `Você é o assistente do sistema À la Kart (Kartódromo de Mauá). Responda em português, de forma curta e objetiva, usando apenas estes dados do sistema quando relevante: ${resumoSistema}. Pergunta do usuário: ${mensagemOriginal}`
+                      text: `Você é o assistente do sistema À la Kart (Kartódromo de Mauá). Responda em português, de forma curta e objetiva, citando apenas os pilotos ativos listados aqui quando falar de dados do sistema: ${resumoSistema}. Pergunta do usuário: ${mensagemOriginal}`
                     }
                   ]
                 }
@@ -579,10 +610,10 @@ app.post('/api/bot', async (req, res) => {
       }
     }
 
-    // 5. Fallback local final (garante resposta mesmo sem LLM ou com erro externo)
+    // 6. Fallback local final
     return res.json({
       resposta:
-        'Posso consultar dados reais do sistema para você. Tente perguntar sobre "campeonatos", "pilotos" ou "histórico de pódios".'
+        'Posso consultar dados reais do sistema para você. Tente perguntar sobre "ranking", "campeonatos", "pilotos" ou "histórico de pódios".'
     });
   } catch (error) {
     console.error('Erro na rota /api/bot:', error);
