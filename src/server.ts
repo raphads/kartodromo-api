@@ -504,8 +504,10 @@ app.post('/api/bot', async (req, res) => {
       return res.json({ resposta: `Últimos pódios registrados:\n${lista}` });
     }
 
-    // 4. Fallback seguro para LLM (só roda se GEMINI_API_KEY estiver configurada)
-    if (process.env.GEMINI_API_KEY) {
+  // 4. Fallback seguro para LLM
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('⚠️ GEMINI_API_KEY não encontrada no ambiente!');
+    } else {
       try {
         const [totalPilotos, totalCampeonatos, ultimosPodios] = await Promise.all([
           prisma.piloto.count(),
@@ -542,7 +544,10 @@ app.post('/api/bot', async (req, res) => {
           }
         );
 
-        if (llmRes.ok) {
+        if (!llmRes.ok) {
+          const erroTexto = await llmRes.text();
+          console.error(`❌ Erro na API Gemini (${llmRes.status}):`, erroTexto);
+        } else {
           const llmData = await llmRes.json();
           const textoGerado = llmData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
           if (textoGerado) {
@@ -550,7 +555,7 @@ app.post('/api/bot', async (req, res) => {
           }
         }
       } catch (llmErr) {
-        console.warn('Fallback LLM falhou, usando resposta padrão:', llmErr.message);
+        console.error('❌ Falha de rede/execução no Gemini:', llmErr);
       }
     }
 
