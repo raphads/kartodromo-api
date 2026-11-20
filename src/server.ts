@@ -504,6 +504,26 @@ app.post('/api/bot', async (req, res) => {
       return res.json({ resposta: `Últimos pódios registrados:\n${lista}` });
     }
 
+    // Regra: Ranking / Classificação
+    if (pergunta.includes('ranking') || pergunta.includes('classificacao') || pergunta.includes('classificação') || pergunta.includes('pontos')) {
+      const historico = await prisma.historico.findMany();
+      if (!historico.length) {
+        return res.json({ resposta: 'Ainda não há corridas no histórico para gerar o ranking.' });
+      }
+      const pts = {};
+      historico.forEach(h => {
+        if (h.nomePrimeiro) pts[h.nomePrimeiro] = (pts[h.nomePrimeiro] || 0) + 25;
+        if (h.nomeSegundo) pts[h.nomeSegundo] = (pts[h.nomeSegundo] || 0) + 18;
+        if (h.nomeTerceiro) pts[h.nomeTerceiro] = (pts[h.nomeTerceiro] || 0) + 15;
+      });
+      const top = Object.entries(pts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([nome, p], i) => `${i + 1}º ${nome} — ${p} pts`)
+        .join('\n');
+      return res.json({ resposta: `🏆 Ranking Geral:\n${top}` });
+    }
+
   // 4. Fallback seguro para LLM
     if (!process.env.GEMINI_API_KEY) {
       console.warn('⚠️ GEMINI_API_KEY não encontrada no ambiente!');
@@ -569,6 +589,70 @@ app.post('/api/bot', async (req, res) => {
     return res.status(500).json({ error: 'Erro ao processar consulta do assistente.' });
   }
 });
+
+
+// -------------------------------------------------------------
+// Rota de Ranking de Pilotos (Gamificação por Pódios)
+// -------------------------------------------------------------
+app.get('/api/ranking', async (req, res) => {
+  try {
+    const [historico, pilotos] = await Promise.all([
+      prisma.historico.findMany(),
+      prisma.piloto.findMany()
+    ]);
+
+    // Mapa para puxar foto/kart/equipe atualizados do piloto
+    const infoPilotos = {};
+    pilotos.forEach(p => {
+      infoPilotos[p.nome] = {
+        foto: p.foto || null,
+        numero: p.numero || '-',
+        equipe: p.equipe || 'Independente'
+      };
+    });
+
+    const tabela = {};
+
+    const pontuar = (nome, fotoHistorico, pontos, posicao) => {
+      if (!nome) return;
+      if (!tabela[nome]) {
+        tabela[nome] = {
+          nome,
+          foto: infoPilotos[nome]?.foto || fotoHistorico || null,
+          numero: infoPilotos[nome]?.numero || '-',
+          equipe: infoPilotos[nome]?.equipe || 'Independente',
+          pontos: 0,
+          ouro: 0,
+          prata: 0,
+          bronze: 0,
+          podios: 0
+        };
+      }
+      tabela[nome].pontos += pontos;
+      tabela[nome].podios += 1;
+      if (posicao === 1) tabela[nome].ouro += 1;
+      if (posicao === 2) tabela[nome].prata += 1;
+      if (posicao === 3) tabela[nome].bronze += 1;
+    };
+
+    historico.forEach(corrida => {
+      pontuar(corrida.nomePrimeiro, corrida.fotoPrimeiro, 25, 1);
+      pontuar(corrida.nomeSegundo, corrida.fotoSegundo, 18, 2);
+      pontuar(corrida.nomeTerceiro, corrida.fotoTerceiro, 15, 3);
+    });
+
+    // Ordena por pontos, depois vitórias (ouro), depois pratas
+    const ranking = Object.values(tabela).sort((a, b) =>
+      b.pontos - a.pontos || b.ouro - a.ouro || b.prata - a.prata
+    );
+
+    return res.json(ranking);
+  } catch (error) {
+    console.error('Erro ao gerar ranking:', error);
+    return res.status(500).json({ error: 'Erro ao calcular ranking de pilotos.' });
+  }
+});
+
 
 // -------------------------------------------------------------
 // Inicialização da API
