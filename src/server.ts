@@ -614,7 +614,7 @@ app.get('/api/ranking', async (req, res) => {
     const tabela = {};
 
     const pontuar = (nome, fotoHistorico, pontos, posicao) => {
-      if (!nome) return;
+      if (!nome|| !infoPilotos[nome]) return;
       if (!tabela[nome]) {
         tabela[nome] = {
           nome,
