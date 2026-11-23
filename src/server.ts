@@ -446,199 +446,362 @@ app.post('/api/historico', async (req, res) => {
 // -------------------------------------------------------------
 // Rota do Assistente / Bot (Regras do Banco + Fallback LLM)
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// Helper: Cache e Leitura do index.html (Horário e Localização)
+// -------------------------------------------------------------
+const DESENVOLVEDORES = [
+  'Raphael Gomes Canova, o gênio',
+  'Naiara Tamires Monteiro da Silva, meu amor',
+  'Anderson da Silva Mazini (Desaparecido)',
+];
+
+let cacheInfoSite: { texto: string; expiraEm: number } | null = null;
+
+async function obterInfoDoIndexHtml(): Promise<string> {
+  const agora = Date.now();
+  if (cacheInfoSite && cacheInfoSite.expiraEm > agora) {
+    return cacheInfoSite.texto;
+  }
+
+  let htmlBruto = '';
+
+  // 1. Tenta ler localmente se existir um index.html na pasta public ou raiz
+  const caminhosLocais = [
+    path.join(__dirname, 'public', 'index.html'),
+    path.join(__dirname, '..', 'index.html'),
+  ];
+
+  for (const caminho of caminhosLocais) {
+    if (fs.existsSync(caminho)) {
+      htmlBruto = fs.readFileSync(caminho, 'utf-8');
+      break;
+    }
+  }
+
+  // 2. Se não houver arquivo local, busca direto do front no GitHub Pages
+  if (!htmlBruto) {
+    const urlFront =
+      process.env.FRONTEND_URL ||
+      'https://kim-kartodromo.github.io/kim-front/'; // <-- ajuste para a URL exata do seu GitHub Pages se necessário
+
+    try {
+      const resp = await fetch(urlFront, { signal: AbortSignal.timeout(4000) });
+      if (resp.ok) {
+        htmlBruto = await resp.text();
+      }
+    } catch {
+      // Ignora erro de rede e usa fallback abaixo
+    }
+  }
+
+  if (!htmlBruto) {
+    return 'Localização: Mauá - SP. Consulte a página inicial do Kartódromo Internacional de Mauá para horários atualizados.';
+  }
+
+  // Remove scripts, styles e tags HTML para extrair o texto limpo da página inicial
+  const textoLimpo = htmlBruto
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Filtra trechos relevantes sobre horário, endereço, cidade e estado
+  const sentencas = textoLimpo
+    .split(/(?<=[.!?|•])\s+|\s{2,}/)
+    .filter((trecho) =>
+      /(hor[aá]rio|funcionamento|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo|feriado|\d{1,2}h|\d{2}:\d{2}|mau[aá]|s[aã]o paulo|\bsp\b|endere[cç]o|rua|av\.|avenida|bairro|cidade|estado)/i.test(
+        trecho
+      )
+    );
+
+  const resumoExtraido = (
+    sentencas.length > 0 ? sentencas.join(' | ') : textoLimpo
+  ).slice(0, 1200);
+
+  cacheInfoSite = {
+    texto: resumoExtraido,
+    expiraEm: agora + 10 * 60 * 1000, // Cache de 10 minutos
+  };
+
+  return resumoExtraido;
+}
+
+function normalizarTexto(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+// -------------------------------------------------------------
+// Rota do Assistente / Bot (Banco + index.html + Autoria + Gemini)
+// -------------------------------------------------------------
 app.post('/api/bot', async (req, res) => {
   try {
     const mensagemOriginal = (req.body?.mensagem || '').trim();
-    const pergunta = mensagemOriginal.toLowerCase();
+    const pergunta = normalizarTexto(mensagemOriginal);
 
     if (!pergunta) {
       return res.json({
-        resposta: 'Pergunte sobre campeonatos, pilotos, ranking ou histórico de pódios!'
+        resposta:
+          'Olá! Posso ajudar com ranking, pilotos, campeonatos, pódios, horário de funcionamento, localização, segurança no kart e automobilismo.',
       });
     }
 
-    // Busca pilotos ativos para filtrar excluídos
-    const pilotosAtivos = await prisma.piloto.findMany();
-    const nomesAtivos = new Set(pilotosAtivos.map(p => p.nome));
+    // 1. Regra: Autoria / Quem criou ou desenvolveu o sistema
+    if (
+      pergunta.includes('quem criou') ||
+      pergunta.includes('quem desenvolveu') ||
+      pergunta.includes('desenvolvedor') ||
+      pergunta.includes('desenvolvedores') ||
+      pergunta.includes('criadores') ||
+      pergunta.includes('autores') ||
+      pergunta.includes('equipe do projeto') ||
+      pergunta.includes('quem fez')
+    ) {
+      const listaDevs = DESENVOLVEDORES.map((nome) => `• ${nome}`).join('\n');
+      return res.json({
+        resposta: `🏁 O sistema À la Kart foi desenvolvido pela equipe:\n${listaDevs}`,
+      });
+    }
 
-    // 1. Regra: Ranking / Classificação (apenas pilotos ativos)
+    // 2. Regra: Horário de funcionamento e Cidade/Estado (lendo do index.html)
+    if (
+      pergunta.includes('horario') ||
+      pergunta.includes('funcionamento') ||
+      pergunta.includes('abre') ||
+      pergunta.includes('fecha') ||
+      pergunta.includes('cidade') ||
+      pergunta.includes('estado') ||
+      pergunta.includes('onde fica') ||
+      pergunta.includes('localizacao') ||
+      pergunta.includes('endereco')
+    ) {
+      const infoSite = await obterInfoDoIndexHtml();
+
+      // Se tiver Gemini configurado, deixa ele formatar a resposta direto a partir do HTML lido
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const llmRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [
+                  {
+                    parts: [
+                      {
+                        text: `Você é o assistente do Kartódromo Internacional de Mauá (sistema À la Kart). Responda de forma direta e amigável em português usando APENAS as informações extraídas da página inicial (index.html) abaixo.\n\nDados do index.html: ${infoSite}\n\nPergunta do usuário: ${mensagemOriginal}`,
+                      },
+                    ],
+                  },
+                ],
+              }),
+            }
+          );
+
+          if (llmRes.ok) {
+            const llmData = await llmRes.json();
+            const respostaFormatada =
+              llmData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+            if (respostaFormatada) {
+              return res.json({ resposta: respostaFormatada });
+            }
+          }
+        } catch {
+          // Cai no retorno direto extraído do HTML
+        }
+      }
+
+      return res.json({
+        resposta: `📍 Informações da página inicial do Kartódromo:\n${infoSite}`,
+      });
+    }
+
+    // Carrega dados reais do banco para consultas esportivas e contexto do Gemini
+    const [pilotosAtivos, campeonatos, historico] = await Promise.all([
+      prisma.piloto.findMany(),
+      prisma.campeonato.findMany({ orderBy: { id: 'desc' } }),
+      prisma.historico.findMany({ orderBy: { id: 'desc' } }),
+    ]);
+
+    const nomesAtivos = new Set(pilotosAtivos.map((p) => p.nome));
+
+    // Calcula tabela de pontuação consolidada (apenas pilotos ativos)
+    const tabelaPontos: Record<
+      string,
+      { pontos: number; ouro: number; prata: number; bronze: number; podios: number }
+    > = {};
+
+    pilotosAtivos.forEach((p) => {
+      tabelaPontos[p.nome] = { pontos: 0, ouro: 0, prata: 0, bronze: 0, podios: 0 };
+    });
+
+    historico.forEach((h) => {
+      if (h.nomePrimeiro && nomesAtivos.has(h.nomePrimeiro)) {
+        tabelaPontos[h.nomePrimeiro].pontos += 25;
+        tabelaPontos[h.nomePrimeiro].ouro += 1;
+        tabelaPontos[h.nomePrimeiro].podios += 1;
+      }
+      if (h.nomeSegundo && nomesAtivos.has(h.nomeSegundo)) {
+        tabelaPontos[h.nomeSegundo].pontos += 18;
+        tabelaPontos[h.nomeSegundo].prata += 1;
+        tabelaPontos[h.nomeSegundo].podios += 1;
+      }
+      if (h.nomeTerceiro && nomesAtivos.has(h.nomeTerceiro)) {
+        tabelaPontos[h.nomeTerceiro].pontos += 15;
+        tabelaPontos[h.nomeTerceiro].bronze += 1;
+        tabelaPontos[h.nomeTerceiro].podios += 1;
+      }
+    });
+
+    // 3. Regra: Consulta específica por nome de um piloto ativo
+    const pilotoCitado = pilotosAtivos.find((p) =>
+      pergunta.includes(normalizarTexto(p.nome))
+    );
+
+    if (
+      pilotoCitado &&
+      (pergunta.includes('ponto') ||
+        pergunta.includes('podio') ||
+        pergunta.includes('vitoria') ||
+        pergunta.includes('kart') ||
+        pergunta.includes('equipe') ||
+        pergunta.includes('estatistica') ||
+        pergunta.includes('desempenho'))
+    ) {
+      const stats = tabelaPontos[pilotoCitado.nome];
+      return res.json({
+        resposta: `🏎️ ${pilotoCitado.nome} (Kart #${pilotoCitado.numero}${
+          pilotoCitado.equipe ? ` • ${pilotoCitado.equipe}` : ''
+        }):\n• Pontuação total: ${stats.pontos} pts\n• Pódios: ${stats.podios} (${stats.ouro}x 1º, ${stats.prata}x 2º, ${stats.bronze}x 3º)`,
+      });
+    }
+
+    // 4. Regra: Ranking Geral
     if (
       pergunta.includes('ranking') ||
       pergunta.includes('classificacao') ||
-      pergunta.includes('classificação') ||
-      pergunta.includes('pontos')
+      pergunta.includes('lider') ||
+      pergunta.includes('pontuacao')
     ) {
-      const historico = await prisma.historico.findMany();
-      const pts = {};
-
-      historico.forEach(h => {
-        if (h.nomePrimeiro && nomesAtivos.has(h.nomePrimeiro)) {
-          pts[h.nomePrimeiro] = (pts[h.nomePrimeiro] || 0) + 25;
-        }
-        if (h.nomeSegundo && nomesAtivos.has(h.nomeSegundo)) {
-          pts[h.nomeSegundo] = (pts[h.nomeSegundo] || 0) + 18;
-        }
-        if (h.nomeTerceiro && nomesAtivos.has(h.nomeTerceiro)) {
-          pts[h.nomeTerceiro] = (pts[h.nomeTerceiro] || 0) + 15;
-        }
-      });
-
-      const top = Object.entries(pts)
-        .sort((a, b) => b[1] - a[1])
+      const top = Object.entries(tabelaPontos)
+        .filter(([, s]) => s.pontos > 0)
+        .sort((a, b) => b[1].pontos - a[1].pontos || b[1].ouro - a[1].ouro)
         .slice(0, 5)
-        .map(([nome, p], i) => `${i + 1}º ${nome} — ${p} pts`)
+        .map(
+          ([nome, s], i) =>
+            `${i + 1}º ${nome} — ${s.pontos} pts (${s.ouro}V / ${s.podios} pódios)`
+        )
         .join('\n');
 
-      if (!top) {
-        return res.json({ resposta: 'Ainda não há pilotos ativos pontuando no ranking.' });
-      }
-
-      return res.json({ resposta: `🏆 Ranking Geral (pilotos ativos):\n${top}` });
+      return res.json({
+        resposta: top
+          ? `🏆 Ranking Geral (pilotos ativos):\n${top}`
+          : 'Ainda não há pilotos ativos pontuando no ranking.',
+      });
     }
 
-    // 2. Regra: Campeonatos e pistas
+    // 5. Regra: Lista direta de Campeonatos
     if (
-      pergunta.includes('campeonato') ||
-      pergunta.includes('pista') ||
-      pergunta.includes('volta') ||
-      pergunta.includes('voltas')
+      (pergunta.includes('quais campeonatos') ||
+        pergunta.includes('listar campeonatos') ||
+        pergunta === 'campeonatos') &&
+      campeonatos.length > 0
     ) {
-      const campeonatos = await prisma.campeonato.findMany({
-        orderBy: { id: 'desc' },
-        take: 4
-      });
-
-      if (!campeonatos.length) {
-        return res.json({ resposta: 'Ainda não há campeonatos cadastrados no sistema.' });
-      }
-
       const lista = campeonatos
-        .map(c => {
-          const dataFmt = c.data ? new Date(c.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : '';
+        .slice(0, 5)
+        .map((c) => {
+          const dataFmt = c.data
+            ? new Date(c.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+            : '';
           return `• ${c.nome} — ${c.voltas} voltas${dataFmt ? ` (${dataFmt})` : ''}`;
         })
         .join('\n');
 
-      return res.json({ resposta: `Campeonatos cadastrados:\n${lista}` });
+      return res.json({ resposta: `🏁 Campeonatos cadastrados:\n${lista}` });
     }
 
-    // 3. Regra: Pilotos e karts
-    if (
-      pergunta.includes('piloto') ||
-      pergunta.includes('kart') ||
-      pergunta.includes('equipe')
-    ) {
-      if (!pilotosAtivos.length) {
-        return res.json({ resposta: 'Nenhum piloto cadastrado até o momento.' });
-      }
-
-      const lista = pilotosAtivos
-        .slice(0, 8)
-        .map(p => `• ${p.nome} (Kart #${p.numero}${p.equipe ? ` - ${p.equipe}` : ''})`)
-        .join('\n');
-
-      return res.json({ resposta: `Pilotos ativos no sistema:\n${lista}` });
-    }
-
-    // 4. Regra: Pódio e histórico de corridas (filtrando excluídos)
-    if (
-      pergunta.includes('podio') ||
-      pergunta.includes('pódio') ||
-      pergunta.includes('historico') ||
-      pergunta.includes('histórico') ||
-      pergunta.includes('corrida') ||
-      pergunta.includes('vencedor') ||
-      pergunta.includes('campeão') ||
-      pergunta.includes('campeao')
-    ) {
-      const corridas = await prisma.historico.findMany({
-        orderBy: { id: 'desc' },
-        take: 3
-      });
-
-      if (!corridas.length) {
-        return res.json({ resposta: 'Ainda não há corridas gravadas no histórico.' });
-      }
-
-      const formatarPiloto = (nome) => (nomesAtivos.has(nome) ? nome : '(piloto inativo)');
-
-      const lista = corridas
-        .map(
-          h =>
-            `• ${h.nomeCampeonato} (${h.numeroVoltas} voltas): 1º ${formatarPiloto(h.nomePrimeiro)}, 2º ${formatarPiloto(h.nomeSegundo)}, 3º ${formatarPiloto(h.nomeTerceiro)}`
-        )
-        .join('\n');
-
-      return res.json({ resposta: `Últimos pódios registrados:\n${lista}` });
-    }
-
-    // 5. Fallback seguro para LLM (passando apenas pilotos ativos no contexto)
+    // 6. Gemini AI: Segurança no Kart, Automobilismo, Regras e Perguntas Abertas
     if (process.env.GEMINI_API_KEY) {
       try {
-        const [totalCampeonatos, ultimosPodios] = await Promise.all([
-          prisma.campeonato.count(),
-          prisma.historico.findMany({ orderBy: { id: 'desc' }, take: 3 })
-        ]);
+        const infoSite = await obterInfoDoIndexHtml();
 
-        const podiosFiltrados = ultimosPodios.map(h => {
-          const p1 = nomesAtivos.has(h.nomePrimeiro) ? h.nomePrimeiro : null;
-          const p2 = nomesAtivos.has(h.nomeSegundo) ? h.nomeSegundo : null;
-          const p3 = nomesAtivos.has(h.nomeTerceiro) ? h.nomeTerceiro : null;
-          const ativosNoPodio = [
-            p1 ? `1º ${p1}` : null,
-            p2 ? `2º ${p2}` : null,
-            p3 ? `3º ${p3}` : null
-          ].filter(Boolean);
+        const rankingResumo = Object.entries(tabelaPontos)
+          .filter(([, s]) => s.pontos > 0)
+          .sort((a, b) => b[1].pontos - a[1].pontos)
+          .slice(0, 5)
+          .map(([nome, s], i) => `${i + 1}º ${nome} (${s.pontos} pts)`)
+          .join(', ');
 
-          return ativosNoPodio.length
-            ? `${h.nomeCampeonato} (${ativosNoPodio.join(', ')})`
-            : null;
-        }).filter(Boolean);
+        const campeonatosResumo = campeonatos
+          .slice(0, 5)
+          .map((c) => `${c.nome} (${c.voltas} voltas)`)
+          .join(', ');
 
-        const resumoSistema = [
-          `Pilotos ativos (${pilotosAtivos.length}): ${pilotosAtivos.map(p => p.nome).join(', ') || 'nenhum'}`,
-          `Total de campeonatos: ${totalCampeonatos}`,
-          `Pódios com pilotos ativos: ${podiosFiltrados.length ? podiosFiltrados.join('; ') : 'nenhum'}`
-        ].join(' | ');
+        const podiosResumo = historico
+          .slice(0, 4)
+          .map((h) => {
+            const p1 = nomesAtivos.has(h.nomePrimeiro) ? h.nomePrimeiro : 'piloto inativo';
+            const p2 = nomesAtivos.has(h.nomeSegundo) ? h.nomeSegundo : 'piloto inativo';
+            const p3 = nomesAtivos.has(h.nomeTerceiro) ? h.nomeTerceiro : 'piloto inativo';
+            return `${h.nomeCampeonato}: 1º ${p1}, 2º ${p2}, 3º ${p3}`;
+          })
+          .join(' | ');
+
+        const promptSistema = `Você é o assistente virtual oficial do sistema "Á la Kart" (Kartódromo Internacional de Mauá).
+Responda sempre em português do Brasil, de forma clara, didática e objetiva (máximo 2 parágrafos curtos ou bullet points).
+
+Suas capacidades:
+1. Responder dúvidas sobre segurança no kartismo (uso obrigatório de capacete com viseira fechada, balaclava, luvas, macacão/roupa fechada, briefing, bandeiras de sinalização, proibição de roupas soltas/cabelo solto, respeito às zonas de frenagem e não bater propositalmente).
+2. Explicar conceitos de automobilismo e kart (traçado ideal/apex, frenagem, bandeiras verde/amarela/vermelha/azul/quadriculada, diferença entre kart indoor/rental e competição, categorias, telemetria, cronometragem).
+3. Responder perguntas sobre os dados reais do kartódromo e do sistema usando EXCLUSIVAMENTE o contexto abaixo (nunca invente pilotos, resultados ou horários):
+
+- Desenvolvedores do sistema: ${DESENVOLVEDORES.join(', ')}
+- Informações da página inicial (index.html): ${infoSite}
+- Pilotos ativos (${pilotosAtivos.length}): ${pilotosAtivos.map((p) => `${p.nome} (Kart #${p.numero})`).join(', ') || 'nenhum'}
+- Ranking atual: ${rankingResumo || 'sem pontuação registrada'}
+- Campeonatos cadastrados (${campeonatos.length}): ${campeonatosResumo || 'nenhum'}
+- Últimos pódios: ${podiosResumo || 'nenhum'}
+
+Pergunta do usuário: ${mensagemOriginal}`;
 
         const llmRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    {
-                      text: `Você é o assistente do sistema À la Kart (Kartódromo de Mauá). Responda em português, de forma curta e objetiva, citando apenas os pilotos ativos listados aqui quando falar de dados do sistema: ${resumoSistema}. Pergunta do usuário: ${mensagemOriginal}`
-                    }
-                  ]
-                }
-              ]
-            })
+              contents: [{ parts: [{ text: promptSistema }] }],
+            }),
           }
         );
 
-        if (!llmRes.ok) {
-          const erroTexto = await llmRes.text();
-          console.error(`❌ Erro na API Gemini (${llmRes.status}):`, erroTexto);
-        } else {
+        if (llmRes.ok) {
           const llmData = await llmRes.json();
-          const textoGerado = llmData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          const textoGerado =
+            llmData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
           if (textoGerado) {
             return res.json({ resposta: textoGerado });
           }
+        } else {
+          const erroTexto = await llmRes.text();
+          console.error(`❌ Erro na API Gemini (${llmRes.status}):`, erroTexto);
         }
       } catch (llmErr) {
         console.error('❌ Falha de rede/execução no Gemini:', llmErr);
       }
     }
 
-    // 6. Fallback local final
+    // 7. Fallback local final caso a API do Gemini esteja indisponível
     return res.json({
       resposta:
-        'Posso consultar dados reais do sistema para você. Tente perguntar sobre "ranking", "campeonatos", "pilotos" ou "histórico de pódios".'
+        'Posso ajudar com informações sobre segurança no kart, automobilismo, ranking, pilotos, campeonatos, horários do kartódromo ou sobre a equipe que desenvolveu o sistema!',
     });
   } catch (error) {
     console.error('Erro na rota /api/bot:', error);
