@@ -450,9 +450,9 @@ app.post('/api/historico', async (req, res) => {
 // Helper: Cache e Leitura do index.html (Horário e Localização)
 // -------------------------------------------------------------
 const DESENVOLVEDORES = [
-  'Raphael Gomes Canova, o gênio',
-  'Naiara Tamires Monteiro da Silva, meu amor',
-  'Anderson da Silva Mazini (Desaparecido)',
+  'Raphael Gomes Canova',
+  'Naiara Tamires Monteiro da Silva',
+  'Anderson da Silva Mazini',
 ];
 
 let cacheInfoSite: { texto: string; expiraEm: number } | null = null;
@@ -587,7 +587,7 @@ app.post('/api/bot', async (req, res) => {
       if (process.env.GEMINI_API_KEY) {
         try {
           const llmRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
