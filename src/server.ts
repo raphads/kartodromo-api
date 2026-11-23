@@ -443,229 +443,7 @@ app.post('/api/historico', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// Rota do Assistente / Bot (Regras do Banco + Fallback LLM)
-// -------------------------------------------------------------
-// -------------------------------------------------------------
-// Helper: Cache e Leitura do index.html (Horário e Localização)
-// -------------------------------------------------------------
-const DESENVOLVEDORES = [
-  'Raphael Gomes Canova',
-  'Naiara Tamires Monteiro da Silva',
-  'Anderson da Silva Mazini',
-];
 
-let cacheIndexHtml = { texto: '', expiraEm: 0 };
-
-async function lerDadosIndexHtml(): Promise<string> {
-  if (cacheIndexHtml.texto && cacheIndexHtml.expiraEm > Date.now()) {
-    return cacheIndexHtml.texto;
-  }
-
-  let html = '';
-
-  // 1. Tenta ler do front publicado no GitHub Pages (configure FRONTEND_URL no Render)
-  const urlsTentativa = [
-    process.env.FRONTEND_URL,
-    'https://kim-kartodromo.github.io/kim-front/index.html',
-    'https://kim-kartodromo.github.io/kim-front/',
-  ].filter(Boolean) as string[];
-
-  for (const url of urlsTentativa) {
-    try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (resp.ok) {
-        html = await resp.text();
-        break;
-      }
-    } catch {
-      // tenta a próxima URL
-    }
-  }
-
-  // 2. Fallback caso exista arquivo local
-  if (!html) {
-    const locais = [
-      path.join(__dirname, 'public', 'index.html'),
-      path.join(__dirname, '..', 'index.html'),
-    ];
-    for (const arq of locais) {
-      if (fs.existsSync(arq)) {
-        html = fs.readFileSync(arq, 'utf-8');
-        break;
-      }
-    }
-  }
-
-  if (!html) {
-    return 'Kartódromo Internacional de Mauá — Cidade: Mauá, Estado: São Paulo (SP).';
-  }
-
-  const textoLimpo = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 4000);
-
-  cacheIndexHtml = {
-    texto: textoLimpo,
-    expiraEm: Date.now() + 10 * 60 * 1000,
-  };
-
-  return textoLimpo;
-}
-
-async function chamarGemini(prompt: string): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error('❌ GEMINI_API_KEY não está configurada no Render!');
-    return null;
-  }
-
-  // Tenta gemini-2.5-flash e, se der erro, tenta gemini-2.0-flash
-  const modelos = ['gemini-3.1-flash-live'];
-
-  for (const modelo of modelos) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-          }),
-        }
-      );
-
-      if (res.ok) {
-        const data = await res.json();
-        const texto = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (texto) return texto;
-      } else {
-        const erroBody = await res.text();
-        console.error(`❌ Falha no modelo ${modelo} (${res.status}):`, erroBody);
-      }
-    } catch (err) {
-      console.error(`❌ Erro de rede ao chamar ${modelo}:`, err);
-    }
-  }
-
-  return null;
-}
-
-app.post('/api/bot', async (req, res) => {
-  try {
-    const mensagemOriginal = (req.body?.mensagem || '').trim();
-
-    if (!mensagemOriginal) {
-      return res.json({
-        resposta:
-          'Olá! Sou o assistente do Á la Kart. Pergunte sobre pilotos, ranking, campeonatos, horários, localização, segurança no kart ou automobilismo!',
-      });
-    }
-
-    // Carrega tudo em paralelo: banco + texto do index.html
-    const [pilotosAtivos, campeonatos, historico, textoIndex] = await Promise.all([
-      prisma.piloto.findMany(),
-      prisma.campeonato.findMany({ orderBy: { id: 'desc' } }),
-      prisma.historico.findMany({ orderBy: { id: 'desc' } }),
-      lerDadosIndexHtml(),
-    ]);
-
-    const nomesAtivos = new Set(pilotosAtivos.map((p) => p.nome));
-
-    // Calcula ranking de pilotos ativos
-    const pts: Record<string, number> = {};
-    historico.forEach((h) => {
-      if (h.nomePrimeiro && nomesAtivos.has(h.nomePrimeiro)) {
-        pts[h.nomePrimeiro] = (pts[h.nomePrimeiro] || 0) + 25;
-      }
-      if (h.nomeSegundo && nomesAtivos.has(h.nomeSegundo)) {
-        pts[h.nomeSegundo] = (pts[h.nomeSegundo] || 0) + 18;
-      }
-      if (h.nomeTerceiro && nomesAtivos.has(h.nomeTerceiro)) {
-        pts[h.nomeTerceiro] = (pts[h.nomeTerceiro] || 0) + 15;
-      }
-    });
-
-    const rankingOrdenado = Object.entries(pts).sort((a, b) => b[1] - a[1]);
-
-    const listaPilotos =
-      pilotosAtivos
-        .map(
-          (p) =>
-            `${p.nome} (Kart #${p.numero}${p.equipe ? `, equipe ${p.equipe}` : ''})`
-        )
-        .join('; ') || 'nenhum piloto cadastrado';
-
-    const listaRanking =
-      rankingOrdenado
-        .map(([nome, pontos], i) => `${i + 1}º ${nome}: ${pontos} pts`)
-        .join('; ') || 'nenhum piloto pontuando ainda';
-
-    const listaCampeonatos =
-      campeonatos
-        .map((c) => {
-          const dataFmt = c.data
-            ? new Date(c.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
-            : '';
-          return `${c.nome} (${c.voltas} voltas${dataFmt ? `, data ${dataFmt}` : ''})`;
-        })
-        .join('; ') || 'nenhum campeonato cadastrado';
-
-    const listaPodios =
-      historico
-        .slice(0, 8)
-        .map((h) => {
-          const p1 = nomesAtivos.has(h.nomePrimeiro) ? h.nomePrimeiro : '(inativo)';
-          const p2 = nomesAtivos.has(h.nomeSegundo) ? h.nomeSegundo : '(inativo)';
-          const p3 = nomesAtivos.has(h.nomeTerceiro) ? h.nomeTerceiro : '(inativo)';
-          return `${h.nomeCampeonato} (${h.numeroVoltas} voltas): 1º ${p1}, 2º ${p2}, 3º ${p3}`;
-        })
-        .join(' | ') || 'nenhum pódio registrado';
-
-    const prompt = `Você é o assistente virtual inteligente do sistema "Á la Kart" (Kartódromo Internacional de Mauá).
-Responda sempre em português do Brasil, de forma simpática, clara e direta.
-
-INSTRUÇÕES IMPORTANTES:
-1. Você tem acesso aos dados reais do banco de dados e da página inicial (index.html) listados abaixo. Use-os para responder perguntas sobre pilotos, ranking, campeonatos, pódios, cidade, estado, endereço e horário de funcionamento.
-2. Se perguntarem quem criou ou desenvolveu o sistema/site, responda informando os nomes: ${DESENVOLVEDORES.join(', ')}.
-3. Se perguntarem sobre temas gerais de kart, segurança na pista (capacete, viseira, balaclava, bandeiras, briefing, comportamento na pista) ou automobilismo em geral, responda com seu conhecimento técnico de forma didática.
-4. Nunca invente pilotos, pontuações ou campeonatos que não estejam nos dados abaixo.
-
-=== DADOS DO SISTEMA E SITE ===
-- Desenvolvedores: ${DESENVOLVEDORES.join(', ')}
-- Pilotos ativos (${pilotosAtivos.length}): ${listaPilotos}
-- Ranking atual (25/18/15 pts): ${listaRanking}
-- Campeonatos cadastrados (${campeonatos.length}): ${listaCampeonatos}
-- Histórico de pódios: ${listaPodios}
-- Conteúdo da página inicial (index.html): ${textoIndex}
-
-=== PERGUNTA DO USUÁRIO ===
-${mensagemOriginal}`;
-
-    // Chama o Gemini como cérebro principal
-    const respostaGemini = await chamarGemini(prompt);
-
-    if (respostaGemini) {
-      return res.json({ resposta: respostaGemini });
-    }
-
-    // Só chega aqui se a API do Gemini falhar de verdade (chave ausente, expirada ou fora do ar)
-    return res.json({
-      resposta:
-        '⚠️ Não consegui conectar à IA no momento. Verifique os logs do servidor (GEMINI_API_KEY).',
-    });
-  } catch (error) {
-    console.error('Erro na rota /api/bot:', error);
-    return res.status(500).json({ error: 'Erro interno no assistente.' });
-  }
-});
 
 // -------------------------------------------------------------
 // Rotas do Chat Comunitário (Mural Persistente)
@@ -718,6 +496,195 @@ app.post('/api/chat', async (req, res) => {
     return res.status(500).json({ error: 'Erro ao salvar mensagem.' });
   }
 });
+
+
+// -------------------------------------------------------------
+// Rota do Assistente / Bot (Regras do Banco + Fallback LLM)
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+// Helper: Cache e Leitura do index.html (Horário e Localização)
+// -------------------------------------------------------------
+const DESENVOLVEDORES = [
+  'Raphael Gomes Canova',
+  'Naiara Tamires Monteiro da Silva',
+  'Anderson da Silva Mazini',
+];
+
+let cacheIndexHtml = { texto: '', expiraEm: 0 };
+
+async function lerDadosIndexHtml(): Promise<string> {
+  if (cacheIndexHtml.texto && cacheIndexHtml.expiraEm > Date.now()) {
+    return cacheIndexHtml.texto;
+  }
+
+  let html = '';
+  const urlsTentativa = [
+    process.env.FRONTEND_URL,
+    'https://kim-kartodromo.github.io/kim-front/index.html',
+    'https://kim-kartodromo.github.io/kim-front/',
+  ].filter(Boolean) as string[];
+
+  for (const url of urlsTentativa) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (resp.ok) {
+        html = await resp.text();
+        break;
+      }
+    } catch {
+      // tenta a próxima URL
+    }
+  }
+
+  if (!html) {
+    return 'Kartódromo Internacional de Mauá — Cidade: Mauá, Estado: São Paulo (SP).';
+  }
+
+  const textoLimpo = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 3500);
+
+  cacheIndexHtml = {
+    texto: textoLimpo,
+    expiraEm: Date.now() + 10 * 60 * 1000,
+  };
+
+  return textoLimpo;
+}
+
+app.post('/api/bot', async (req, res) => {
+  try {
+    const mensagemOriginal = (req.body?.mensagem || '').trim();
+
+    if (!mensagemOriginal) {
+      return res.json({
+        resposta:
+          'Olá! Sou o assistente do Á la Kart. Pergunte sobre pilotos, ranking, campeonatos, horários, localização, segurança no kart ou automobilismo!',
+      });
+    }
+
+    // Carrega banco de dados e texto do index.html em paralelo
+    const [pilotosAtivos, campeonatos, historico, textoIndex] = await Promise.all([
+      prisma.piloto.findMany(),
+      prisma.campeonato.findMany({ orderBy: { id: 'desc' } }),
+      prisma.historico.findMany({ orderBy: { id: 'desc' } }),
+      lerDadosIndexHtml(),
+    ]);
+
+    const nomesAtivos = new Set(pilotosAtivos.map((p) => p.nome));
+
+    // Calcula ranking atual (apenas pilotos ativos)
+    const pts: Record<string, number> = {};
+    historico.forEach((h) => {
+      if (h.nomePrimeiro && nomesAtivos.has(h.nomePrimeiro)) {
+        pts[h.nomePrimeiro] = (pts[h.nomePrimeiro] || 0) + 25;
+      }
+      if (h.nomeSegundo && nomesAtivos.has(h.nomeSegundo)) {
+        pts[h.nomeSegundo] = (pts[h.nomeSegundo] || 0) + 18;
+      }
+      if (h.nomeTerceiro && nomesAtivos.has(h.nomeTerceiro)) {
+        pts[h.nomeTerceiro] = (pts[h.nomeTerceiro] || 0) + 15;
+      }
+    });
+
+    const rankingOrdenado = Object.entries(pts).sort((a, b) => b[1] - a[1]);
+
+    const listaPilotos =
+      pilotosAtivos
+        .map((p) => `${p.nome} (Kart #${p.numero}${p.equipe ? `, equipe ${p.equipe}` : ''})`)
+        .join('; ') || 'nenhum piloto cadastrado';
+
+    const listaRanking =
+      rankingOrdenado
+        .map(([nome, pontos], i) => `${i + 1}º ${nome}: ${pontos} pts`)
+        .join('; ') || 'ninguém pontuando ainda';
+
+    const listaCampeonatos =
+      campeonatos
+        .map((c) => {
+          const dataFmt = c.data
+            ? new Date(c.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
+            : '';
+          return `${c.nome} (${c.voltas} voltas${dataFmt ? `, ${dataFmt}` : ''})`;
+        })
+        .join('; ') || 'nenhum campeonato cadastrado';
+
+    const listaPodios =
+      historico
+        .slice(0, 6)
+        .map((h) => {
+          const p1 = nomesAtivos.has(h.nomePrimeiro) ? h.nomePrimeiro : '(inativo)';
+          const p2 = nomesAtivos.has(h.nomeSegundo) ? h.nomeSegundo : '(inativo)';
+          const p3 = nomesAtivos.has(h.nomeTerceiro) ? h.nomeTerceiro : '(inativo)';
+          return `${h.nomeCampeonato} (${h.numeroVoltas} voltas): 1º ${p1}, 2º ${p2}, 3º ${p3}`;
+        })
+        .join(' | ') || 'nenhum pódio registrado';
+
+    const contextoSistema = `Você é o assistente virtual oficial do sistema "Á la Kart" (Kartódromo Internacional de Mauá).
+Responda sempre em português do Brasil, de forma simpática, clara e objetiva.
+
+REGRAS:
+1. Para perguntas sobre pilotos, ranking, campeonatos, pódios, cidade, estado, endereço e horário de funcionamento, use EXCLUSIVAMENTE os dados reais fornecidos abaixo. Nunca invente registros.
+2. Se perguntarem quem criou ou desenvolveu o sistema, informe os nomes: ${DESENVOLVEDORES.join(', ')}.
+3. Para perguntas sobre kartismo, regras de segurança na pista (capacete, viseira, balaclava, bandeiras, briefing) ou automobilismo em geral, responda naturalmente com seu conhecimento técnico.
+
+=== DADOS REAIS DO SISTEMA E DO SITE ===
+- Desenvolvedores: ${DESENVOLVEDORES.join(', ')}
+- Pilotos ativos (${pilotosAtivos.length}): ${listaPilotos}
+- Ranking atual (25/18/15 pts): ${listaRanking}
+- Campeonatos (${campeonatos.length}): ${listaCampeonatos}
+- Últimos pódios: ${listaPodios}
+- Conteúdo extraído da página inicial (index.html): ${textoIndex}`;
+
+    if (!process.env.GROQ_API_KEY) {
+      return res.json({
+        resposta: '⚠️ Variável GROQ_API_KEY não configurada no servidor.',
+      });
+    }
+
+    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.4,
+        max_tokens: 500,
+        messages: [
+          { role: 'system', content: contextoSistema },
+          { role: 'user', content: mensagemOriginal },
+        ],
+      }),
+    });
+
+    if (!groqRes.ok) {
+      const erroTexto = await groqRes.text();
+      console.error(`❌ Erro na Groq (${groqRes.status}):`, erroTexto);
+      return res.json({
+        resposta: '⚠️ A IA demorou ou falhou ao responder agora. Tente novamente em instantes.',
+      });
+    }
+
+    const groqData = await groqRes.json();
+    const respostaIA = groqData?.choices?.[0]?.message?.content?.trim();
+
+    return res.json({
+      resposta: respostaIA || 'Não consegui formular uma resposta agora.',
+    });
+  } catch (error) {
+    console.error('Erro na rota /api/bot:', error);
+    return res.status(500).json({ error: 'Erro interno no assistente.' });
+  }
+});
+
 
 // -------------------------------------------------------------
 // Inicialização da API
