@@ -527,7 +527,7 @@ async function chamarGemini(prompt: string): Promise<string | null> {
   }
 
   // Tenta gemini-2.5-flash e, se der erro, tenta gemini-2.0-flash
-  const modelos = ['gemini-3-flash-live'];
+  const modelos = ['gemini-3.1-flash-live'];
 
   for (const modelo of modelos) {
     try {
