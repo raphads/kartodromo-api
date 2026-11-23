@@ -482,7 +482,7 @@ async function obterInfoDoIndexHtml(): Promise<string> {
   if (!htmlBruto) {
     const urlFront =
       process.env.FRONTEND_URL ||
-      'https://kim-kartodromo.github.io/kim-front/'; // <-- ajuste para a URL exata do seu GitHub Pages se necessário
+      'https://raphads.github.io/kim-front/index'; // <-- ajuste para a URL exata do seu GitHub Pages se necessário
 
     try {
       const resp = await fetch(urlFront, { signal: AbortSignal.timeout(4000) });
