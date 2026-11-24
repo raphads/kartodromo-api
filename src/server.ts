@@ -520,8 +520,8 @@ async function lerDadosIndexHtml(): Promise<string> {
   let html = '';
   const urlsTentativa = [
     process.env.FRONTEND_URL,
-    'https://kim-kartodromo.github.io/kim-front/index.html',
-    'https://kim-kartodromo.github.io/kim-front/',
+    'https://raphads.github.io/kim-front/index.html',
+    'https://raphads.github.io/kim-front/',
   ].filter(Boolean) as string[];
 
   for (const url of urlsTentativa) {
