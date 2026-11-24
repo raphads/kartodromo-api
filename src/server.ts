@@ -687,6 +687,68 @@ REGRAS:
 
 
 // -------------------------------------------------------------
+// Rota de Ranking de Pilotos (Gamificação por Pódios)
+// -------------------------------------------------------------
+app.get('/api/ranking', async (req, res) => {
+  try {
+    const [historico, pilotos] = await Promise.all([
+      prisma.historico.findMany(),
+      prisma.piloto.findMany()
+    ]);
+
+    // Mapa para puxar foto/kart/equipe atualizados do piloto
+    const infoPilotos = {};
+    pilotos.forEach(p => {
+      infoPilotos[p.nome] = {
+        foto: p.foto || null,
+        numero: p.numero || '-',
+        equipe: p.equipe || 'Independente'
+      };
+    });
+
+    const tabela = {};
+
+    const pontuar = (nome, fotoHistorico, pontos, posicao) => {
+      if (!nome|| !infoPilotos[nome]) return;
+      if (!tabela[nome]) {
+        tabela[nome] = {
+          nome,
+          foto: infoPilotos[nome]?.foto || fotoHistorico || null,
+          numero: infoPilotos[nome]?.numero || '-',
+          equipe: infoPilotos[nome]?.equipe || 'Independente',
+          pontos: 0,
+          ouro: 0,
+          prata: 0,
+          bronze: 0,
+          podios: 0
+        };
+      }
+      tabela[nome].pontos += pontos;
+      tabela[nome].podios += 1;
+      if (posicao === 1) tabela[nome].ouro += 1;
+      if (posicao === 2) tabela[nome].prata += 1;
+      if (posicao === 3) tabela[nome].bronze += 1;
+    };
+
+    historico.forEach(corrida => {
+      pontuar(corrida.nomePrimeiro, corrida.fotoPrimeiro, 25, 1);
+      pontuar(corrida.nomeSegundo, corrida.fotoSegundo, 18, 2);
+      pontuar(corrida.nomeTerceiro, corrida.fotoTerceiro, 15, 3);
+    });
+
+    // Ordena por pontos, depois vitórias (ouro), depois pratas
+    const ranking = Object.values(tabela).sort((a, b) =>
+      b.pontos - a.pontos || b.ouro - a.ouro || b.prata - a.prata
+    );
+
+    return res.json(ranking);
+  } catch (error) {
+    console.error('Erro ao gerar ranking:', error);
+    return res.status(500).json({ error: 'Erro ao calcular ranking de pilotos.' });
+  }
+});
+
+// -------------------------------------------------------------
 // Inicialização da API
 // -------------------------------------------------------------
 const PORT = 3000;
